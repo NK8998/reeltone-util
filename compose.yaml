@@ -1,0 +1,129 @@
+x-auth-database: &auth-database
+  PGHOST: postgres
+  PGPORT: "5432"
+  PGDATABASE: reeltone_auth
+  PGUSER: reeltone_auth
+  PGPASSWORD: ${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD in the selected env file}
+
+x-reviews-database: &reviews-database
+  PGHOST: postgres
+  PGPORT: "5432"
+  PGDATABASE: reeltone_reviews
+  PGUSER: reeltone_reviews
+  PGPASSWORD: ${REVIEWS_DB_PASSWORD:?Set REVIEWS_DB_PASSWORD in the selected env file}
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD in the selected env file}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - database
+
+  provision-db:
+    image: postgres:17
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGDATABASE: postgres
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD in the selected env file}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD in the selected env file}
+      REVIEWS_DB_PASSWORD: ${REVIEWS_DB_PASSWORD:?Set REVIEWS_DB_PASSWORD in the selected env file}
+    command: ["psql", "-X", "--set=ON_ERROR_STOP=1", "--file=/provision.sql"]
+    volumes:
+      - ./postgres/provision.sql:/provision.sql:ro
+    networks:
+      - database
+
+  migrate-auth:
+    image: ${AUTH_IMAGE:-reeltone-auth:local}
+    command: ["npm", "run", "migration:deploy"]
+    depends_on:
+      provision-db:
+        condition: service_completed_successfully
+    environment: *auth-database
+    networks:
+      - database
+
+  reeltone-auth:
+    image: ${AUTH_IMAGE:-reeltone-auth:local}
+    restart: unless-stopped
+    depends_on:
+      migrate-auth:
+        condition: service_completed_successfully
+    environment:
+      <<: *auth-database
+      HOST: 0.0.0.0
+      PORT: "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/readyz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - database
+      - apps
+
+  migrate-reviews:
+    image: ${REVIEWS_API_IMAGE:-reeltone-reviews-api:local}
+    command: ["python", "migrate.py"]
+    depends_on:
+      provision-db:
+        condition: service_completed_successfully
+    environment: *reviews-database
+    networks:
+      - database
+
+  reeltone-reviews-api:
+    image: ${REVIEWS_API_IMAGE:-reeltone-reviews-api:local}
+    restart: unless-stopped
+    depends_on:
+      reeltone-auth:
+        condition: service_healthy
+      migrate-reviews:
+        condition: service_completed_successfully
+    environment: *reviews-database
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8888/readyz', timeout=2).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - database
+      - apps
+
+  reeltone-reviews-web:
+    image: ${REVIEWS_WEB_IMAGE:-reeltone-reviews-web:local}
+    restart: unless-stopped
+    depends_on:
+      reeltone-reviews-api:
+        condition: service_healthy
+    environment:
+      REVIEWS_BACKEND_URL: http://reeltone-reviews-api:8888
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/reeltone/auth/session').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - apps
+
+networks:
+  database:
+    internal: true
+  apps:
+
+volumes:
+  postgres-data:

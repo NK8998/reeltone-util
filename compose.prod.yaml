@@ -1,0 +1,49 @@
+name: reeltone-prod
+
+services:
+  migrate-auth:
+    image: ${AUTH_IMAGE:?Set AUTH_IMAGE in .env.prod}
+
+  reeltone-auth:
+    image: ${AUTH_IMAGE:?Set AUTH_IMAGE in .env.prod}
+    env_file: reeltone-auth.env
+    environment:
+      NODE_ENV: production
+      AUTH_ISSUER: https://auth.reeltone.site
+      AUTH_TRUST_PROXY: "1"
+
+  migrate-reviews:
+    image: ${REVIEWS_API_IMAGE:?Set REVIEWS_API_IMAGE in .env.prod}
+
+  reeltone-reviews-api:
+    image: ${REVIEWS_API_IMAGE:?Set REVIEWS_API_IMAGE in .env.prod}
+    env_file: reeltone-reviews.env
+    environment:
+      APP_ENV: production
+      AUTH_ISSUER: https://auth.reeltone.site
+      AUTH_INTERNAL_URL: https://auth.reeltone.site
+      REVIEWS_ORIGIN: https://reviews.reeltone.site
+
+  reeltone-reviews-web:
+    image: ${REVIEWS_WEB_IMAGE:?Set REVIEWS_WEB_IMAGE in .env.prod}
+
+  nginx:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    depends_on:
+      reeltone-auth:
+        condition: service_healthy
+      reeltone-reviews-web:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d:ro
+      - ${AUTH_TLS_DIR:?Set AUTH_TLS_DIR in .env.prod}:/etc/nginx/tls/auth:ro
+      - ${REVIEWS_TLS_DIR:?Set REVIEWS_TLS_DIR in .env.prod}:/etc/nginx/tls/reviews:ro
+    networks:
+      apps:
+        aliases:
+          - auth.reeltone.site
+
