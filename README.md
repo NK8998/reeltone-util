@@ -20,9 +20,17 @@ The local stack runs Next.js with Fast Refresh, Flask with its reloader, and Aut
 
 For a normal restart, use the same command without `--build`. Rebuild after dependency or Dockerfile changes. Recreate the affected service after changing its env file. To apply new SQL migrations without rebuilding, use the same Compose files followed by `run --rm migrate-auth` or `run --rm migrate-reviews`.
 
-Reviews talks to Flask inside Docker. Auth and Reviews use separate databases and login roles on the shared PostgreSQL volume. Compose runs provisioning and both migration jobs before starting the apps. The first local deployment imports any existing Reviews SQLite files under `../reeltone-reviews/server/db` through a read-only mount on the migration job.
+Reviews talks to Flask inside Docker. Auth and Reviews use separate databases and login roles on the shared PostgreSQL volume. Compose provisions the databases and applies their schemas before starting the apps. To import a legacy Reviews SQLite backup, mount it read-only and pass `--sqlite` or `--sqlite-sessions` explicitly to `migrate-reviews`.
 
 Use the same env and Compose files with `logs -f` to view the app logs or `down` to stop the stack.
+
+### Reset all local database data
+
+```sh
+./reset-db.sh --yes
+```
+
+This permanently deletes the local PostgreSQL volume, including all Auth and Reviews data. The script starts the local stack with fresh databases and applies the schemas. Legacy SQLite imports require a separate command.
 
 ## Production
 

@@ -40,11 +40,10 @@ services:
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     working_dir: /workspace
     environment:
-      REVIEWS_LEGACY_SQLITE_FILE: /legacy/reeltone.db
-      REVIEWS_LEGACY_SESSIONS_FILE: /legacy/reviews-sessions.sqlite3
+      REVIEWS_LEGACY_SQLITE_FILE: ""
+      REVIEWS_LEGACY_SESSIONS_FILE: ""
     volumes:
       - ../reeltone-reviews/server:/workspace:ro
-      - ../reeltone-reviews/server/db:/legacy:ro
 
   reeltone-reviews-api:
     build: *reviews-build
