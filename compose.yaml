@@ -48,7 +48,7 @@ services:
       - database
 
   migrate-auth:
-    image: ${AUTH_IMAGE:-reeltone-auth:local}
+    image: ${SERVER_IMAGE:-reeltone-server:local}
     command: ["npm", "run", "migration:deploy"]
     depends_on:
       provision-db:
@@ -57,28 +57,9 @@ services:
     networks:
       - database
 
-  reeltone-auth:
-    image: ${AUTH_IMAGE:-reeltone-auth:local}
-    restart: unless-stopped
-    depends_on:
-      migrate-auth:
-        condition: service_completed_successfully
-    environment:
-      <<: *auth-database
-      HOST: 0.0.0.0
-      PORT: "3000"
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/readyz').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-    networks:
-      - database
-      - apps
-
   migrate-reviews:
-    image: ${REVIEWS_API_IMAGE:-reeltone-reviews-api:local}
-    command: ["python", "migrate.py"]
+    image: ${SERVER_IMAGE:-reeltone-server:local}
+    command: ["npm", "run", "migration:reviews"]
     depends_on:
       provision-db:
         condition: service_completed_successfully
@@ -86,17 +67,26 @@ services:
     networks:
       - database
 
-  reeltone-reviews-api:
-    image: ${REVIEWS_API_IMAGE:-reeltone-reviews-api:local}
+  reeltone-server:
+    image: ${SERVER_IMAGE:-reeltone-server:local}
     restart: unless-stopped
+    init: true
     depends_on:
-      reeltone-auth:
-        condition: service_healthy
+      migrate-auth:
+        condition: service_completed_successfully
       migrate-reviews:
         condition: service_completed_successfully
-    environment: *reviews-database
+    environment:
+      <<: *auth-database
+      HOST: 0.0.0.0
+      PORT: "3000"
+      REVIEWS_PGHOST: postgres
+      REVIEWS_PGPORT: "5432"
+      REVIEWS_PGDATABASE: reeltone_reviews
+      REVIEWS_PGUSER: reeltone_reviews
+      REVIEWS_PGPASSWORD: ${REVIEWS_DB_PASSWORD:?Set REVIEWS_DB_PASSWORD in the selected env file}
     healthcheck:
-      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8888/readyz', timeout=2).close()"]
+      test: ["CMD", "node", "-e", "Promise.all(['/readyz','/reviews/readyz'].map(p => fetch('http://127.0.0.1:3000' + p))).then(rs => { if (rs.some(r => !r.ok)) process.exit(1) }).catch(() => process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -108,14 +98,31 @@ services:
     image: ${REVIEWS_WEB_IMAGE:-reeltone-reviews-web:local}
     restart: unless-stopped
     depends_on:
-      reeltone-reviews-api:
+      reeltone-server:
         condition: service_healthy
     environment:
-      REVIEWS_BACKEND_URL: http://reeltone-reviews-api:8888
+      REVIEWS_BACKEND_URL: http://reeltone-server:3000/reviews
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/reeltone/auth/session').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
       interval: 5s
       timeout: 3s
+      retries: 12
+    networks:
+      - apps
+
+  reeltone-stream-web:
+    image: ${STREAM_WEB_IMAGE:-reeltone-stream-web:local}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      reeltone-server:
+        condition: service_healthy
+    environment:
+      REELTONE_SERVER_URL: http://reeltone-server:3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
       retries: 12
     networks:
       - apps

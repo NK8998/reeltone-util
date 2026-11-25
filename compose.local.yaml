@@ -1,8 +1,8 @@
 name: reeltone-local
 
-x-auth-source: &auth-source
-  - ../reeltone-auth/src:/app/src:ro
-  - ../reeltone-auth/migrations:/app/migrations:ro
+x-server-build: &server-build
+  context: ../reeltone-server
+  target: development
 
 services:
   postgres:
@@ -10,86 +10,78 @@ services:
       - "127.0.0.1:${POSTGRES_LOCAL_PORT:-5433}:5432"
 
   migrate-auth:
-    image: reeltone-auth:development
-    build: &auth-build
-      context: ../reeltone-auth
-      target: development
-    command: ["node", "--import", "tsx", "src/migrate.ts"]
-    volumes: *auth-source
-
-  reeltone-auth:
-    image: reeltone-auth:development
-    build: *auth-build
-    init: true
-    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
-    env_file: ../reeltone-auth/.env
-    environment:
-      NODE_ENV: development
-      AUTH_ISSUER: http://localhost:3000
-      AUTH_TRUST_PROXY: "0"
-      AUTH_JWKS_FILE: /app/.keys/oidc.json
+    image: reeltone-server:development
+    build: *server-build
+    command: ["node", "--import", "tsx", "src/auth/migrate.ts"]
     volumes:
-      - ../reeltone-auth/.keys:/app/.keys:ro
-      - ../reeltone-auth/src:/app/src:ro
-      - ../reeltone-auth/tsconfig.json:/app/tsconfig.json:ro
-    ports:
-      - "127.0.0.1:3000:3000"
+      - ../reeltone-server/src:/app/src:ro
+      - ../reeltone-server/migrations:/app/migrations:ro
 
   migrate-reviews:
-    build: &reviews-build ../reeltone-reviews/server
+    image: reeltone-server:development
+    build: *server-build
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
-    working_dir: /workspace
+    command: ["node", "--import", "tsx", "src/reviews/migrate.ts"]
     environment:
       REVIEWS_LEGACY_SQLITE_FILE: ""
       REVIEWS_LEGACY_SESSIONS_FILE: ""
     volumes:
-      - ../reeltone-reviews/server:/workspace:ro
+      - ../reeltone-server/src:/app/src:ro
+      - ../reeltone-server/reviews/db/migrations:/app/reviews/db/migrations:ro
 
-  reeltone-reviews-api:
-    build: *reviews-build
-    init: true
+  reeltone-server:
+    image: reeltone-server:development
+    build: *server-build
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
-    working_dir: /workspace
-    command:
-      - python
-      - -m
-      - flask
-      - --app
-      - app
-      - run
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8888"
-      - --reload
-      - --no-debugger
-      - --exclude-patterns
-      - "/workspace/.venv/*:/workspace/venv/*"
-    env_file: ../reeltone-reviews/server/.env
+    env_file:
+      - ../reeltone-server/reviews/.env
+      - ../reeltone-server/.env
     environment:
+      NODE_ENV: development
       APP_ENV: development
       AUTH_ISSUER: http://localhost:3000
-      AUTH_INTERNAL_URL: http://reeltone-auth:3000
+      AUTH_INTERNAL_URL: http://127.0.0.1:3000
+      AUTH_TRUST_PROXY: "0"
+      AUTH_JWKS_FILE: /app/.keys/oidc.json
       REVIEWS_ORIGIN: http://localhost:3101
     volumes:
-      - ../reeltone-reviews/server:/workspace:ro
+      - ../reeltone-server/.keys:/app/.keys:ro
+      - ../reeltone-server/src:/app/src:ro
+      - ../reeltone-server/tsconfig.json:/app/tsconfig.json:ro
+      - ../reeltone-server/streaming:/app/streaming:ro
+    ports:
+      - "127.0.0.1:3000:3000"
 
   reeltone-reviews-web:
     image: reeltone-reviews-web:development
     init: true
     build:
-      context: ../reeltone-reviews/client
+      context: ../reeltone-reviews
       target: development
     environment:
       NEXT_PUBLIC_SITE_URL: http://localhost:3101
     volumes:
-      - ../reeltone-reviews/client/src:/app/src:ro
-      - ../reeltone-reviews/client/public:/app/public:ro
-      - ../reeltone-reviews/client/next.config.ts:/app/next.config.ts:ro
-      - ../reeltone-reviews/client/postcss.config.mjs:/app/postcss.config.mjs:ro
-      - ../reeltone-reviews/client/tsconfig.json:/app/tsconfig.json:ro
+      - ../reeltone-reviews/src:/app/src:ro
+      - ../reeltone-reviews/public:/app/public:ro
+      - ../reeltone-reviews/next.config.ts:/app/next.config.ts:ro
+      - ../reeltone-reviews/postcss.config.mjs:/app/postcss.config.mjs:ro
+      - ../reeltone-reviews/tsconfig.json:/app/tsconfig.json:ro
     ports:
       - "127.0.0.1:3101:3000"
+
+  reeltone-stream-web:
+    image: reeltone-stream-web:development
+    build:
+      context: ../reeltone-stream
+      target: development
+    volumes:
+      - ../reeltone-stream/src:/app/src:ro
+      - ../reeltone-stream/public:/app/public:ro
+      - ../reeltone-stream/data:/app/data:ro
+      - ../reeltone-stream/next.config.ts:/app/next.config.ts:ro
+      - ../reeltone-stream/tsconfig.json:/app/tsconfig.json:ro
+    ports:
+      - "127.0.0.1:${STREAM_LOCAL_PORT:-3102}:3000"
 
 networks:
   database:

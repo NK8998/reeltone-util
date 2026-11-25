@@ -2,38 +2,39 @@ name: reeltone-prod
 
 services:
   migrate-auth:
-    image: ${AUTH_IMAGE:?Set AUTH_IMAGE in .env.prod}
-
-  reeltone-auth:
-    image: ${AUTH_IMAGE:?Set AUTH_IMAGE in .env.prod}
-    env_file: reeltone-auth.env
-    environment:
-      NODE_ENV: production
-      AUTH_ISSUER: https://auth.reeltone.site
-      AUTH_TRUST_PROXY: "1"
+    image: ${SERVER_IMAGE:?Set SERVER_IMAGE in .env.prod}
 
   migrate-reviews:
-    image: ${REVIEWS_API_IMAGE:?Set REVIEWS_API_IMAGE in .env.prod}
+    image: ${SERVER_IMAGE:?Set SERVER_IMAGE in .env.prod}
 
-  reeltone-reviews-api:
-    image: ${REVIEWS_API_IMAGE:?Set REVIEWS_API_IMAGE in .env.prod}
-    env_file: reeltone-reviews.env
+  reeltone-server:
+    image: ${SERVER_IMAGE:?Set SERVER_IMAGE in .env.prod}
+    env_file:
+      - reeltone-reviews.env
+      - reeltone-auth.env
     environment:
+      NODE_ENV: production
       APP_ENV: production
       AUTH_ISSUER: https://auth.reeltone.site
+      AUTH_TRUST_PROXY: "1"
       AUTH_INTERNAL_URL: https://auth.reeltone.site
       REVIEWS_ORIGIN: https://reviews.reeltone.site
 
   reeltone-reviews-web:
     image: ${REVIEWS_WEB_IMAGE:?Set REVIEWS_WEB_IMAGE in .env.prod}
 
+  reeltone-stream-web:
+    image: ${STREAM_WEB_IMAGE:?Set STREAM_WEB_IMAGE in .env.prod}
+
   nginx:
     image: nginx:stable-alpine
     restart: unless-stopped
     depends_on:
-      reeltone-auth:
+      reeltone-server:
         condition: service_healthy
       reeltone-reviews-web:
+        condition: service_healthy
+      reeltone-stream-web:
         condition: service_healthy
     ports:
       - "80:80"
@@ -42,6 +43,7 @@ services:
       - ./nginx:/etc/nginx/conf.d:ro
       - ${AUTH_TLS_DIR:?Set AUTH_TLS_DIR in .env.prod}:/etc/nginx/tls/auth:ro
       - ${REVIEWS_TLS_DIR:?Set REVIEWS_TLS_DIR in .env.prod}:/etc/nginx/tls/reviews:ro
+      - ${STREAM_TLS_DIR:?Set STREAM_TLS_DIR in .env.prod}:/etc/nginx/tls/stream:ro
     networks:
       apps:
         aliases:
